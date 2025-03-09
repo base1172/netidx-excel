@@ -76,11 +76,11 @@ unsafe fn irtd_update_event_loop(
 unsafe extern "system" fn irtd_update_event_thread(ptr: *mut c_void) -> u32 {
     let args = Box::from_raw(ptr.cast::<IRTDUpdateEventThreadArgs>());
     match CoInitialize(None) {
-        Ok(()) => (),
-        Err(e) => {
-            error!("update_event_thread: failed to initialize COM {}", e);
+        hr if hr.is_err() => {
+            error!("update_event_thread: failed to initialize COM {hr}");
             return 0;
         }
+        _ => (),
     }
     let idp: Com::IDispatch = match CoGetInterfaceAndReleaseStream(&args.stream) {
         Ok(i) => i,

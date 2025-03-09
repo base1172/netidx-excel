@@ -2,7 +2,10 @@ use com::{
     interfaces::IUnknown,
     sys::{HRESULT, IID},
 };
-use windows::Win32::System::Com::{ITypeInfo, DISPPARAMS, EXCEPINFO, SAFEARRAY, VARIANT};
+use windows::Win32::System::{
+    Com::{ITypeInfo, DISPPARAMS, EXCEPINFO, SAFEARRAY},
+    Variant::VARIANT,
+};
 
 // bde5f32a-14d9-414e-a0af-8390a1601944
 pub const CLSID: IID = IID {

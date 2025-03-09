@@ -6,12 +6,12 @@ pub mod variant;
 use anyhow::Result;
 use dirs;
 use log::LevelFilter;
-use once_cell::sync::Lazy;
 use simplelog;
 use std::{
     default::Default,
     fs::{self, File},
     path::PathBuf,
+    sync::LazyLock,
 };
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -55,7 +55,8 @@ fn load_config_and_init_log() -> Result<Config> {
     Ok(config)
 }
 
-pub static CONFIG: Lazy<Config> = Lazy::new(|| match load_config_and_init_log() {
-    Ok(c) => c,
-    Err(_) => Config::default(),
-});
+pub static CONFIG: LazyLock<Config> =
+    LazyLock::new(|| match load_config_and_init_log() {
+        Ok(c) => c,
+        Err(_) => Config::default(),
+    });

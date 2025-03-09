@@ -9,21 +9,20 @@ use netidx::{
     pool::{Pool, Pooled},
     subscriber::{DesiredAuth, Dval, Event, SubId, Subscriber, UpdatesFlags},
 };
-use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 use std::{
     collections::{HashMap, HashSet},
     default::Default,
     fmt, mem,
-    sync::Arc,
+    sync::{Arc, LazyLock},
 };
 use tokio::runtime::Runtime;
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub(crate) struct TopicId(pub i32);
 
-static PENDING: Lazy<Pool<FxHashMap<TopicId, Event>>> =
-    Lazy::new(|| Pool::new(3, 1_000_000));
+static PENDING: LazyLock<Pool<FxHashMap<TopicId, Event>>> =
+    LazyLock::new(|| Pool::new(3, 1_000_000));
 
 struct ServerInner {
     runtime: Runtime,

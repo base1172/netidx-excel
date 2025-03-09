@@ -15,15 +15,16 @@ use windows::{
         Foundation::SysAllocStringLen,
         Globalization::lstrlenW,
         System::{
-            Com::{
-                IDispatch, SAFEARRAY, SAFEARRAYBOUND, VARENUM, VARIANT, VARIANT_0_0_0,
-                VT_ARRAY, VT_BOOL, VT_BSTR, VT_BYREF, VT_DISPATCH, VT_ERROR, VT_I4,
-                VT_I8, VT_NULL, VT_R4, VT_R8, VT_UI4, VT_UI8, VT_VARIANT,
-            },
+            Com::{IDispatch, SAFEARRAY, SAFEARRAYBOUND},
             Ole::{
                 SafeArrayCreate, SafeArrayDestroy, SafeArrayGetDim, SafeArrayGetLBound,
                 SafeArrayGetUBound, SafeArrayGetVartype, SafeArrayLock,
-                SafeArrayPtrOfIndex, SafeArrayUnlock, VariantClear, VariantInit,
+                SafeArrayPtrOfIndex, SafeArrayUnlock,
+            },
+            Variant::{
+                VariantClear, VariantInit, VARENUM, VARIANT, VARIANT_0_0_0, VT_ARRAY,
+                VT_BOOL, VT_BSTR, VT_BYREF, VT_DISPATCH, VT_ERROR, VT_I4, VT_I8, VT_NULL,
+                VT_R4, VT_R8, VT_UI4, VT_UI8, VT_VARIANT,
             },
         },
     },
@@ -105,7 +106,7 @@ impl<'a> TryInto<String> for &'a Variant {
             bail!("not a string")
         } else {
             let s = unsafe { &*self.val().bstrVal };
-            Ok(OsString::from_wide(s.as_wide()).to_string_lossy().to_string())
+            Ok(s.try_into()?)
         }
     }
 }

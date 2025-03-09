@@ -2,124 +2,192 @@
 extern crate serde_derive;
 mod comglue;
 mod server;
-use anyhow::{bail, Result};
-use com::{
-    production::Class,
-    sys::{CLASS_E_CLASSNOTAVAILABLE, CLSID, HRESULT, IID, NOERROR, SELFREG_E_CLASS},
-};
-use comglue::glue::NetidxRTD;
-use comglue::interface::CLSID;
-use std::{ffi::c_void, mem, ptr};
-
-// sadly this doesn't register the class name, just the ID, so we must do all the
-// registration ourselves because excel requires the name to be mapped to the id
-//com::inproc_dll_module![(CLSID, NetidxRTD),];
-
-static mut _HMODULE: *mut c_void = ptr::null_mut();
+mod xll_utils;
+use anyhow::Result;
+use comglue::{glue::NetidxRTD, interface::CLSID};
+use xll_utils::xloper12;
+mod setter;
 
 #[no_mangle]
-unsafe extern "system" fn DllMain(
-    hinstance: *mut c_void,
-    fdw_reason: u32,
-    _reserved: *mut c_void,
-) -> i32 {
-    const DLL_PROCESS_ATTACH: u32 = 1;
-    if fdw_reason == DLL_PROCESS_ATTACH {
-        _HMODULE = hinstance;
-    }
-    1
-}
+extern "system" fn NetGet(path: xll_utils::LPXLOPER12) -> xll_utils::LPXLOPER12 {
+    use xll_utils::*;
+    let mut res = XLOper12::error(XlErr::GettingData);
+    const CLASS_NAME: XLOper12 = xloper12_const_string!("NetidxRTD");
 
-#[no_mangle]
-unsafe extern "system" fn DllGetClassObject(
-    class_id: *const CLSID,
-    iid: *const IID,
-    result: *mut *mut c_void,
-) -> HRESULT {
-    assert!(
-        !class_id.is_null(),
-        "class id passed to DllGetClassObject should never be null"
-    );
-
-    let class_id = &*class_id;
-    if class_id == &CLSID {
-        let instance = <NetidxRTD as Class>::Factory::allocate();
-        instance.QueryInterface(&*iid, result)
-    } else {
-        CLASS_E_CLASSNOTAVAILABLE
+    match excel12v(
+        Xlfn::xlfRtd,
+        res.as_mut_xloper12(),
+        &[CLASS_NAME.as_lpxloper12(), XLOper12::missing().as_lpxloper12(), path],
+    ) {
+        0 => res.into(),
+        _nonzero_ => XLOper12::error(XlErr::NA).into(),
     }
 }
 
-use winreg::{enums::*, RegKey};
+#[no_mangle]
+extern "system" fn NetSet(
+    path: *const std::ffi::c_char,
+    value: xll_utils::LPXLOPER12,
+    ty: *const std::ffi::c_char,
+) -> xll_utils::LPXLOPER12 {
+    use netidx::subscriber::Value;
+    use std::ffi::CStr;
+    use xll_utils::*;
 
-extern "system" {
-    fn GetModuleFileNameA(hModule: *mut c_void, lpFilename: *mut i8, nSize: u32) -> u32;
+    const SET: XLOper12 = xloper12_const_string!("#SET");
+
+    static SETTER: std::sync::LazyLock<Option<setter::Setter>> =
+        std::sync::LazyLock::new(|| match setter::Setter::new() {
+            Err(e) => {
+                log::error!("Error creating Netidx setter: {e}");
+                None
+            }
+            Ok(setter) => Some(setter),
+        });
+
+    /// The type of data to publish
+    enum NetSetType {
+        Auto,
+        F64,
+        I64,
+        Null,
+        Time,
+        String,
+        Bool,
+    }
+
+    impl NetSetType {
+        fn apply(&self, raw: LPXLOPER12) -> Value {
+            match self {
+                NetSetType::Auto => Value::from(&unsafe { *raw }),
+                NetSetType::F64 => Value::F64(f64::from(&unsafe { *raw })),
+                NetSetType::I64 => i64::try_from(&unsafe { *raw })
+                    .map(Value::from)
+                    .unwrap_or(Value::Error("#VALUE!".into())),
+                NetSetType::Null => Value::Null,
+                NetSetType::String => match String::try_from(&unsafe { *raw }) {
+                    Ok(s) => s.into(),
+                    Err(e) => Value::Error(e.to_string().into()),
+                },
+                NetSetType::Bool => match bool::try_from(&unsafe { *raw }) {
+                    Ok(v) => v.into(),
+                    Err(()) => Value::Error("#TYPE!".into()),
+                },
+                NetSetType::Time => {
+                    use chrono::{
+                        offset::LocalResult::*, Duration, NaiveDateTime, TimeZone as _,
+                    };
+                    // Excel's epoch is midnight on 1900-01-00 (i.e., 1899-12-31)
+                    const EXCEL_EPOCH: chrono::NaiveDateTime =
+                        chrono::NaiveDate::from_ymd_opt(1899, 12, 31)
+                            .expect("never raises")
+                            .and_hms_opt(0, 0, 0)
+                            .expect("never raises");
+                    let mut v: f64 = f64::from(&unsafe { *raw });
+                    if v < 0.0 {
+                        Value::Error("#VALUE!".into())
+                    } else {
+                        if v > 59.0 {
+                            // Due to a legacy bug, Excel treats Feb 1900 as having 29 days, so we need to subtract 1 for dates above this
+                            // [https://learn.microsoft.com/en-us/office/troubleshoot/excel/wrongly-assumes-1900-is-leap-year]
+                            v -= 1.0;
+                        }
+                        let date: chrono::NaiveDateTime =
+                            EXCEL_EPOCH + chrono::Duration::days(v as i64);
+                        let milliseconds = (v.fract() * 86_400.0 * 1_000.0) as i64; // convert to milliseconds * 24.0 * 60.0 * 60.0 * 1000
+                        let naive_time: NaiveDateTime =
+                            date + Duration::milliseconds(milliseconds);
+
+                        match chrono::Local.from_local_datetime(&naive_time) {
+                            Single(time) => Value::DateTime(time.to_utc()),
+                            Ambiguous(_, _) => Value::Error("#AMBIGUOUS_TIME".into()),
+                            None => Value::Error("#VALUE!".into()),
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    impl TryFrom<*const std::ffi::c_char> for NetSetType {
+        type Error = ();
+
+        fn try_from(ptr: *const std::ffi::c_char) -> Result<Self, ()> {
+            match ptr.is_null() {
+                true => Ok(Self::Auto),
+                false => match unsafe { CStr::from_ptr(ptr) }.to_bytes() {
+                    b"" | b"auto" => Ok(Self::Auto),
+                    b"f64" => Ok(Self::F64),
+                    b"i64" => Ok(Self::I64),
+                    b"null" => Ok(Self::Null),
+                    b"time" => Ok(Self::Time),
+                    b"string" => Ok(Self::String),
+                    b"bool" => Ok(Self::Bool),
+                    _ => Err(()),
+                },
+            }
+        }
+    }
+
+    match unsafe { CStr::from_ptr(path) }.to_str() {
+        Err(_) => XLOper12::error(XlErr::NA).into(),
+        Ok(s) => match NetSetType::try_from(ty) {
+            Err(()) => XLOper12::error(XlErr::NA).into(),
+            Ok(typ) => {
+                let path: netidx::path::Path = Into::<netidx::path::Path>::into(s);
+                let value = typ.apply(value);
+                match *SETTER {
+                    None => XLOper12::error(XlErr::NA).into(),
+                    Some(ref setter) => match setter.set(path, value) {
+                        Ok(()) => SET.as_lpxloper12(),
+                        Err(tokio::sync::mpsc::error::SendError((path, value))) => {
+                            log::error!("failure setting {value} at netidx path {path}");
+                            XLOper12::error(XlErr::NA).into()
+                        }
+                    },
+                }
+            }
+        },
+    }
 }
 
-unsafe fn get_dll_file_path(hmodule: *mut c_void) -> String {
-    const MAX_FILE_PATH_LENGTH: usize = 260;
-
-    let mut path = [0u8; MAX_FILE_PATH_LENGTH];
-
-    let len = GetModuleFileNameA(
-        hmodule,
-        path.as_mut_ptr() as *mut _,
-        MAX_FILE_PATH_LENGTH as _,
-    );
-
-    String::from_utf8(path[..len as usize].to_vec()).unwrap()
-}
-
-fn clsid(id: CLSID) -> String {
-    format!("{{{}}}", id)
-}
-
-fn register_clsid(root: &RegKey, clsid: &String) -> Result<()> {
-    let (by_id, _) = root.create_subkey(&format!("CLSID\\{}", &clsid))?;
-    let (by_id_inproc, _) = by_id.create_subkey("InprocServer32")?;
-    by_id.set_value(&"", &"NetidxRTD")?;
-    by_id_inproc.set_value("", &unsafe { get_dll_file_path(_HMODULE) })?;
+fn register_udfs() -> Result<()> {
+    xll_udf!("NetGet", NetGet).register(
+        "QQ$", // Q for the return value, Q for the path, $ for thread-safe
+        "path",
+        "Netidx",
+        "Subscribe to a Netidx path",
+        &[],
+    )?;
+    xll_udf!("NetSet", NetSet).register(
+        "QCQC$", // Q for the return value, C for the path, Q for the LPXLOPER12 value, C for the type, $ for thread-safe
+        "path,value,[type]",
+        "Netidx",
+        "Write to a Netidx container",
+        &[],
+    )?;
     Ok(())
 }
 
-fn dll_register_server() -> Result<()> {
-    let hkcr = RegKey::predef(HKEY_CLASSES_ROOT);
-    let (by_name, _) = hkcr.create_subkey("NetidxRTD\\CLSID")?;
-    let clsid = clsid(CLSID);
-    by_name.set_value("", &clsid)?;
-    if mem::size_of::<usize>() == 8 {
-        register_clsid(&hkcr, &clsid)?;
-    } else if mem::size_of::<usize>() == 4 {
-        let wow = hkcr.open_subkey("WOW6432Node")?;
-        register_clsid(&wow, &clsid)?;
-    } else {
-        bail!("can't figure out the word size")
+#[no_mangle]
+extern "system" fn xlAutoOpen() -> i32 {
+    let hr = DllRegisterServer();
+    if hr.is_err() {
+        log::debug!("DllRegisterServer failed: HRESULT {hr}");
     }
-    Ok(())
+
+    // register all the functions we are exporting to Excel
+    match register_udfs() {
+        Ok(()) => {}
+        Err(e) => log::error!("Could not register UDFs: {e}"),
+    }
+
+    1 // Per Excel SDK docs, this function must return [1]
 }
 
 #[no_mangle]
-extern "system" fn DllRegisterServer() -> HRESULT {
-    match dll_register_server() {
-        Err(_) => SELFREG_E_CLASS,
-        Ok(()) => NOERROR,
-    }
+extern "system" fn xlAutoClose() -> i32 {
+    1 // Per Excel SDK docs, this function must return [1]
 }
 
-fn dll_unregister_server() -> Result<()> {
-    let hkcr = RegKey::predef(HKEY_CLASSES_ROOT);
-    let clsid = clsid(CLSID);
-    hkcr.delete_subkey_all("NetidxRTD")?;
-    assert!(clsid.len() > 0);
-    hkcr.delete_subkey_all(&format!("CLSID\\{}", clsid))?;
-    hkcr.delete_subkey_all(&format!("WOW6432Node\\CLSID\\{}", clsid))?;
-    Ok(())
-}
-
-#[no_mangle]
-extern "system" fn DllUnregisterServer() -> HRESULT {
-    match dll_unregister_server() {
-        Err(_) => SELFREG_E_CLASS,
-        Ok(()) => NOERROR,
-    }
-}
+register_xll_module![("NetidxRTD", CLSID, NetidxRTD),];

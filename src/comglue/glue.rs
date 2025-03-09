@@ -13,8 +13,9 @@ use netidx::{
     path::Path,
     subscriber::{Event, Value},
 };
-use windows::Win32::System::Com::{
-    ITypeInfo, DISPPARAMS, EXCEPINFO, SAFEARRAY, SAFEARRAYBOUND, VARIANT,
+use windows::Win32::System::{
+    Com::{ITypeInfo, DISPPARAMS, EXCEPINFO, SAFEARRAY, SAFEARRAYBOUND},
+    Variant::VARIANT,
 };
 
 struct Params(*mut DISPPARAMS);

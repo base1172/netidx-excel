@@ -1,4 +1,4 @@
-This is an Excel COM add-in that allows the `=RTD()` formula to pull in real time data from Netidx.
+This is an Excel COM add-in that allows you subscribe to real time data from Netidx. You can also write data to a Netidx container.
 
 Say you have published some data, maybe from the shell publisher, and you want to show it to your boss, but "that commandline thing" or "that linux thing" is not something your boss does.
 ```bash
@@ -16,10 +16,31 @@ The key point is if a value in netidx updates, Excel will update almost immediat
 # Syntax
 
 ```
-=RTD("netidxrtd",, PATH)
+=NetGet(PATH)
 ```
 
 `PATH` can of course be a ref, or another formula, it's Excel, your boss knows Excel ... right?
+
+Alternatively, you can subscribe using Excel's built-in `=RTD()` function:
+```
+=RTD("NetidxRTD",,PATH)
+```
+There should be no material difference in performance between subscribing to data using `=NetGet()` versus using `=RTD()`.
+
+# Writing
+
+You can write to a Netidx path using the `=NetSet()` function. This requires that the publisher at that path supports write requests. Generally, `=NetSet()` should be used for writing to a Netidx container.
+```
+=NetSet(PATH,VALUE,[TYPE])
+```
+If the `TYPE` parameter is omitted, the add-in will try to choose an appropriate type for the value you are publishing. Alternatively, you can explicitly specify one of the below types:
+* "auto"
+* "f64"
+* "i64"
+* "null"
+* "time"
+* "string"
+* "bool"
 
 # Performance 
 
@@ -43,17 +64,7 @@ The dll should be built in `target/release/netidx_excel.dll`
 
 # Installing
 
-To install you need to decide where you want the dll to live, it really doesn't matter, but I put it in `C:\Program Files\netidx-excel` on my machine. Then you need to run `regsvr32` on the dll as Administrator, that will set up the registry entries to register it as a proper COM server. So in an admin powershell,
-
-```powershell
-> mkdir 'C:\Program Files\netidx-excel'
-> cp target\release\netidx_excel.dll 'C:\Program Files\netidx-excel'
-> regsvr32 'C:\Program Files\netidx-excel\netidx_excel.dll'
-```
-
-The most common errors are `regsvr32` isn't in your path, and/or your shell is not running with admin rights.
-
-You might also need to open the properties of the dll and "unblock" it (if you downloaded a binary instead of building it yourself).
+To install you need to decide where you want the add-in to live, it really doesn't matter where, but you should rename it to have an XLL extension (I use `netidx_excel.xll`). Then open Excel `Options | Add-ins`, select `Excel Add-ins`, and click `Go...`. Then `Browse` to the location where you have saved the XLL.
 
 ## 32 bit office on 64 bit windows
 
@@ -61,11 +72,5 @@ If you are running the 32 bit version of office, maybe because you have limited 
 
 # Limitations
 
-- No write support; there's no real reason other than time, it's perfectly possible
 - No publish support; again, no real reason, perfectly possible, but significantly more time than write
 - No resolver list support; once again, time, no real problems with this
-- I could remove the requirement for admin rights to install if people cared, but then you'd have to `regsvr32` it for every user on a machine
-
-# Other
-
-I programmed on windows for a WHOLE month so that you NEVER have too. Because trust me, you NEVER want to. But if you are curious about the dreams I had during that month, read this before bed [Inside COM+](https://www.thrysoee.dk/InsideCOM+/ch05c.htm). Really, don't do it. COM must have seemed like a good idea to someone at some point in history, right? Developers! Developers! Developers! ... Developers! I mean, GObject seems totally great now, really.
