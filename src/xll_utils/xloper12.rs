@@ -40,11 +40,6 @@ impl xloper12 {
     }
 }
 
-pub struct Dim {
-    cols: usize,
-    rows: usize,
-}
-
 /// A wrapper around XLOPER12 that automatically frees allocated resources when dropped
 #[repr(transparent)]
 pub(crate) struct XLOper12(XLOPER12);
@@ -85,43 +80,6 @@ impl XLOper12 {
 
     pub const fn as_lpxloper12(&self) -> LPXLOPER12 {
         (&self.0) as *const xloper12 as LPXLOPER12
-    }
-
-    /// Gets the dimensions of this XLOper12. Nil is treated as having size 1. Missing values are treated as having zero size.
-    pub const fn dim(&self) -> Dim {
-        const fn get_sref_dim(sref: &XLREF12) -> Dim {
-            let rows = 1 + (sref.rwLast - sref.rwFirst) as usize;
-            let cols = 1 + (sref.colLast - sref.colFirst) as usize;
-            Dim { cols, rows }
-        }
-
-        const fn get_mref_dim(mref: *const XLMREF12) -> Dim {
-            // currently we only handle single contiguous references
-            if mref.is_null() || unsafe { (*mref).count } != 1 {
-                return Dim { cols: 0, rows: 0 };
-            }
-
-            get_sref_dim(unsafe { &(*mref).reftbl[0] })
-        }
-
-        match self.xltype() {
-            XLType::Multi => unsafe {
-                let cols = self.0.val.array.columns as usize;
-                let rows = self.0.val.array.rows as usize;
-                Dim { cols, rows }
-            },
-            XLType::SRef => get_sref_dim(unsafe { &self.0.val.sref.ref_ }),
-            XLType::Ref => get_mref_dim(unsafe { self.0.val.mref.lpmref }),
-            XLType::Num
-            | XLType::Str
-            | XLType::Bool
-            | XLType::Err
-            | XLType::Nil
-            | XLType::Int => Dim { cols: 1, rows: 1 },
-            XLType::Missing | XLType::Flow | XLType::BigData | XLType::Unknown(_) => {
-                Dim { cols: 0, rows: 0 }
-            }
-        }
     }
 
     // Construct an XLOper12 from an LPXLOPER12 without taking ownership. Intentionally NOT public
@@ -269,31 +227,35 @@ impl<'a> TryFrom<&'a XLOper12> for String {
     }
 }
 
-impl From<&xloper12> for f64 {
-    fn from(v: &xloper12) -> f64 {
+impl TryFrom<&xloper12> for f64 {
+    type Error = ();
+
+    fn try_from(v: &xloper12) -> Result<f64, ()> {
         match v.xltype() {
-            XLType::Num => unsafe { v.val.num },
-            XLType::Int => unsafe { v.val.w as f64 },
-            XLType::Str => f64::NAN,
-            XLType::Bool => (unsafe { v.val.xbool == 1 }) as i64 as f64,
+            XLType::Num => Ok(unsafe { v.val.num }),
+            XLType::Int => Ok(unsafe { v.val.w as f64 }),
+            XLType::Str => Err(()),
+            XLType::Bool => Ok((unsafe { v.val.xbool == 1 }) as i64 as f64),
             XLType::Multi => unsafe {
                 let p = v.val.array.lparray;
-                f64::from(&*p.offset(0))
+                f64::try_from(&*p.offset(0))
             },
-            XLType::Ref | XLType::SRef => f64::NAN, // TODO: Consider handling these cases
+            XLType::Ref | XLType::SRef => Err(()), // CR-soon wgross: Consider handling these cases
             XLType::Nil
             | XLType::Err
             | XLType::Flow
             | XLType::Missing
             | XLType::BigData
-            | XLType::Unknown(_) => f64::NAN,
+            | XLType::Unknown(_) => Err(()),
         }
     }
 }
 
-impl From<&XLOper12> for f64 {
-    fn from(v: &XLOper12) -> f64 {
-        f64::from(&v.0)
+impl<'a> TryFrom<&'a XLOper12> for f64 {
+    type Error = <f64 as TryFrom<&'a xloper12>>::Error;
+
+    fn try_from(v: &'a XLOper12) -> Result<f64, Self::Error> {
+        f64::try_from(&v.0)
     }
 }
 
@@ -400,56 +362,6 @@ impl From<&xloper12> for netidx::subscriber::Value {
             XLType::SRef => Value::Error(format!("#UNSUPPORTED_SREF").into()),
             XLType::BigData => Value::Error(format!("#UNSUPPORTED_BIGDATA").into()),
             XLType::Unknown(typ) => Value::Error(format!("#UNKNOWN{typ}").into()),
-        }
-    }
-}
-
-/// Convert an [XLOper12] into an f64 array, filling missing or invalid elements with f64::NAN
-impl<'a> From<&'a XLOper12> for Vec<f64> {
-    fn from(v: &'a XLOper12) -> Vec<f64> {
-        let Dim { cols, rows } = v.dim();
-        if cols == 1 && rows == 1 {
-            vec![f64::from(v)]
-        } else {
-            let mut arr = vec![f64::NAN; cols * rows];
-            let slice: &'a [xloper12] =
-                unsafe { std::slice::from_raw_parts(v.0.val.array.lparray, cols * rows) };
-            for j in 0..rows {
-                for i in 0..cols {
-                    let index = j * cols + i;
-                    arr[index] = f64::from(&slice[index]);
-                }
-            }
-            arr
-        }
-    }
-}
-
-impl From<&xloper12> for Vec<f64> {
-    fn from(xloper: &xloper12) -> Vec<f64> {
-        Vec::from(&XLOper12(*xloper))
-    }
-}
-
-/// Convert an XLOper12 into a String array
-impl<'a> TryFrom<&'a XLOper12> for Vec<String> {
-    type Error = <String as TryFrom<&'a xloper12>>::Error;
-
-    fn try_from(v: &'a XLOper12) -> Result<Vec<String>, Self::Error> {
-        let Dim { cols, rows } = v.dim();
-        if cols == 1 && rows == 1 {
-            Ok(vec![String::try_from(v)?])
-        } else {
-            let mut arr = vec![String::new(); cols * rows];
-            let slice: &'a [xloper12] =
-                unsafe { std::slice::from_raw_parts(v.0.val.array.lparray, cols * rows) };
-            for j in 0..rows {
-                for i in 0..cols {
-                    let index = j * cols + i;
-                    arr[index] = String::try_from(&slice[index])?;
-                }
-            }
-            Ok(arr)
         }
     }
 }
