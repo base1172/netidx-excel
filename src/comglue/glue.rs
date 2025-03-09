@@ -210,6 +210,7 @@ com::class! {
             exception: *mut EXCEPINFO,
             arg_error: *mut u32
         ) -> HRESULT {
+            use crate::xll_utils::XlErr;
             debug!(
                 "invoke(id: {}, iid: {:?}, lcid: {}, flags: {}, params: {:?}, result: {:?}, exception: {:?}, arg_error: {:?})",
                 id, iid, lcid, flags, params, result, exception, arg_error
@@ -220,7 +221,7 @@ com::class! {
                 Ok(p) => p,
                 Err(e) => {
                     error!("failed to wrap params {}", e);
-                    *result = Variant::error();
+                    *result = Variant::error(XlErr::NA);
                     return NOERROR;
                 }
             };
@@ -231,7 +232,7 @@ com::class! {
                         Ok(()) => { *result = Variant::from(1); },
                         Err(e) => {
                             error!("server_start invalid arg {}", e);
-                            *result = Variant::error();
+                            *result = Variant::error(XlErr::NA);
                         }
                     }
                },
@@ -243,10 +244,10 @@ com::class! {
                 2 => {
                     debug!("ConnectData");
                     match dispatch_connect_data(&self.server, params) {
-                        Ok(()) => { *result = Variant::from(1); },
+                        Ok(()) => { *result = Variant::error(XlErr::GettingData); },
                         Err(e) => {
                             error!("connect_data invalid arg {}", e);
-                            *result = Variant::error();
+                            *result = Variant::error(XlErr::NA);
                         }
                     }
                 },
@@ -256,7 +257,7 @@ com::class! {
                         Ok(()) => (),
                         Err(e) => {
                             error!("refresh_data failed {}", e);
-                            *result = Variant::error();
+                            *result = Variant::error(XlErr::NA);
                         }
                     }
                 },
@@ -266,7 +267,7 @@ com::class! {
                         Ok(()) => { *result = Variant::from(1); }
                         Err(e) => {
                             error!("disconnect_data invalid arg {}", e);
-                            *result = Variant::error()
+                            *result = Variant::error(XlErr::NA)
                         }
                     }
                 },

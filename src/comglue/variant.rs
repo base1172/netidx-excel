@@ -283,9 +283,13 @@ impl Variant {
         v
     }
 
-    pub fn error() -> Variant {
-        let mut v = Self::default();
-        unsafe { v.set_typ(VT_ERROR) }
+    pub(crate) fn error(err: crate::xll_utils::XlErr) -> Variant {
+        const VT_XL_ERR_OFFSET: u32 = 2148141008;
+        let mut v = Self::new();
+        unsafe {
+            v.set_typ(VT_ERROR);
+            v.val_mut().ulVal = VT_XL_ERR_OFFSET + Into::<u32>::into(err);
+        }
         v
     }
 

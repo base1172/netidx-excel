@@ -1,7 +1,7 @@
-pub mod dispatch;
-pub mod glue;
-pub mod interface;
-pub mod variant;
+pub(crate) mod dispatch;
+pub(crate) mod glue;
+pub(crate) mod interface;
+pub(crate) mod variant;
 
 use anyhow::Result;
 use dirs;
