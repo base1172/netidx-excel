@@ -111,7 +111,9 @@ unsafe extern "system" fn irtd_update_event_thread(ptr: *mut c_void) -> u32 {
         }
     }
     debug!("update_event_thread: called GetIDsOfNames dispid: {:?}", dispids);
-    irtd_update_event_loop(dispids[0], args.rx, idp);
+    let IRTDUpdateEventThreadArgs { stream, rx } = *args;
+    std::mem::forget(stream); // TODO: Instead of just forgetting, Figure out how to safely drop this
+    irtd_update_event_loop(dispids[0], rx, idp);
     CoUninitialize();
     0
 }
