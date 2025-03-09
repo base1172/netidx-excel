@@ -82,7 +82,8 @@ unsafe extern "system" fn irtd_update_event_thread(ptr: *mut c_void) -> u32 {
         }
         _ => (),
     }
-    let idp: Com::IDispatch = match CoGetInterfaceAndReleaseStream(&args.stream) {
+    let IRTDUpdateEventThreadArgs { stream, rx } = *args;
+    let idp: Com::IDispatch = match CoGetInterfaceAndReleaseStream(&stream) {
         Ok(i) => i,
         Err(e) => {
             error!(
@@ -93,6 +94,7 @@ unsafe extern "system" fn irtd_update_event_thread(ptr: *mut c_void) -> u32 {
             return 0;
         }
     };
+    std::mem::forget(stream); // The stream was released by CoGetInterfaceAndReleaseStream, so we need to prevent its drop function from being called
     let mut update_notify = str_to_wstr("UpdateNotify");
     let mut dispids = [0i32];
     debug!("get_dispids: calling GetIDsOfNames");
@@ -111,8 +113,6 @@ unsafe extern "system" fn irtd_update_event_thread(ptr: *mut c_void) -> u32 {
         }
     }
     debug!("update_event_thread: called GetIDsOfNames dispid: {:?}", dispids);
-    let IRTDUpdateEventThreadArgs { stream, rx } = *args;
-    std::mem::forget(stream); // TODO: Instead of just forgetting, Figure out how to safely drop this
     irtd_update_event_loop(dispids[0], rx, idp);
     CoUninitialize();
     0
