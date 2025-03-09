@@ -72,5 +72,9 @@ If you are running the 32 bit version of office, maybe because you have limited 
 
 # Limitations
 
-- No publish support; again, no real reason, perfectly possible, but significantly more time than write
+- No publish support; there's no real reason other than time, it's perfectly possible
 - No resolver list support; once again, time, no real problems with this
+
+# Other
+
+I programmed on windows for a WHOLE month so that you NEVER have too. Because trust me, you NEVER want to. But if you are curious about the dreams I had during that month, read this before bed [Inside COM+](https://www.thrysoee.dk/InsideCOM+/ch05c.htm). Really, don't do it. COM must have seemed like a good idea to someone at some point in history, right? Developers! Developers! Developers! ... Developers! I mean, GObject seems totally great now, really.
