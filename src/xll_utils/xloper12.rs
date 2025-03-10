@@ -240,7 +240,7 @@ impl TryFrom<&xloper12> for f64 {
                 let p = v.val.array.lparray;
                 f64::try_from(&*p.offset(0))
             },
-            XLType::Ref | XLType::SRef => Err(()), // CR-soon wgross: Consider handling these cases
+            XLType::Ref | XLType::SRef => Err(()), // TODO: Consider handling these cases
             XLType::Nil
             | XLType::Err
             | XLType::Flow
