@@ -19,7 +19,10 @@ extern "system" fn NetGet(path: xll_utils::LPXLOPER12) -> xll_utils::LPXLOPER12 
         res.as_mut_xloper12(),
         &[CLASS_NAME.as_lpxloper12(), XLOper12::missing().as_lpxloper12(), path],
     ) {
-        0 => res.into(),
+        0 => {
+            res.set_xlfree();
+            res.into()
+        }
         _nonzero_ => XLOper12::error(XlErr::NA).into(),
     }
 }
@@ -164,6 +167,11 @@ extern "system" fn NetSet(
 }
 
 fn register_udfs() -> Result<()> {
+    // TODO: The 'Xlfrtd' function that's used in `NetGet()` is only thread-safe in recent versions of Excel (AFAIK, it became thread-safe around 2020).
+    // We should check the Excel version and based on that decide whether to mark this function as thread-safe.
+    //
+    // This announcement suggests it became thread-safe with Excel M365 version 2002:
+    // <https://learn.microsoft.com/en-us/office/vba/excel/concepts/excel-performance/excel-performance-and-limit-improvements>
     xll_udf!("NetGet", NetGet).register(
         "QQ$", // Q for the return value, Q for the path, $ for thread-safe
         "path",
